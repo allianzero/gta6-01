@@ -1,164 +1,83 @@
-// Pedestrians: Palmira Bay's residents, strolling the sidewalks. They wander,
-// cross streets at intersections, and flee from gunfire, explosions and cars
-// bearing down on them. A few carry cash the player can pick up when they drop it.
+// Palmira Bay — pedestrians: beach-goers, shoppers and workers who stroll
+// the sidewalks, flee gunfire and panic when a car comes at them.
+import { makeRng, rngChoice, rngRange, rngInt } from './rng.js';
+import { clamp, dist, angleTo } from './util.js';
+import { randomSidewalkSpot, resolveCircle, nearestRoadPoint } from './world.js';
 
-import { PEDS, WORLD, WORLD_W } from './config.js';
-import { makeRng, range, pick } from './rng.js';
-import { clamp, dist, TAU } from './util.js';
-import { randomSidewalkPoint, nearestStreetCoord, collideCity } from './city.js';
-
-const SHIRTS = ['#e74c3c', '#3498db', '#2ecc71', '#f1c40f', '#9b59b6', '#e67e22', '#1abc9c', '#ecf0f1', '#fd79a8', '#00cec9'];
-const SKINS = ['#f1c27d', '#e0ac69', '#c68642', '#8d5524', '#ffdbac'];
-
-export function makePed(x, y, rng) {
-  return {
-    x, y,
-    angle: rng() * TAU,
-    speed: range(rng, PEDS.walkMin, PEDS.walkMax),
-    shirt: pick(rng, SHIRTS),
-    skin: pick(rng, SKINS),
-    // A wander target on a sidewalk; a new one is picked on arrival.
-    tx: x, ty: y,
-    wait: 0,
-    fleeing: false,
-    fleeTime: 0,
-    dead: false,
-    // Rarely, a ped drops cash when startled or hit.
-    hasCash: rng() < 0.18,
+const NAMES = ['Maya', 'Luis', 'Carmen', 'Diego', 'Sofia', 'Rosa', 'Tomas', 'Elena', 'Paco', 'Nina', 'Hugo', 'Lena'];
+const SHIRTS = ['#e84f6a', '#4fa8e8', '#e8c94f', '#7ae84f', '#c97ae8', '#e88a4f', '#4fe8c9', '#f2f2f2'];
+let pedId = 1;
+export function makePed(G, x, y) {
+  const rng = makeRng(G.seed + pedId * 97);
+  const ped = {
+    id: pedId++, name: rngChoice(rng, NAMES),
+    x, y, angle: rng() * Math.PI * 2,
+    speed: rngRange(rng, 28, 52), color: rngChoice(rng, SHIRTS),
+    hp: 50, dead: false, panic: 0, fleeX: 0, fleeY: 0,
+    target: null, waitT: rngRange(rng, 0, 3), cash: rngInt(rng, 5, 60),
+    walkPhase: rng() * 6.28,
   };
+  ped.target = pickTarget(G, ped);
+  return ped;
 }
-
-export function spawnPeds(G, count) {
-  const rng = makeRng(G.seed + 913);
-  for (let i = 0; i < count; i++) {
-    let p = null;
-    for (let tries = 0; tries < 10 && !p; tries++) {
-      const pt = randomSidewalkPoint(rng);
-      if (dist(pt.x, pt.y, G.player.x, G.player.y) > 300) p = makePed(pt.x, pt.y, rng);
-    }
-    if (p) {
-      pickNewTarget(G, p, rng);
-      G.peds.push(p);
-    }
-  }
+function pickTarget(G, ped) {
+  const s = randomSidewalkSpot(makeRng(G.seed + ped.id * 13 + Math.floor(G.time * 0.5)));
+  return { x: s.x, y: s.y };
 }
-
-function pickNewTarget(G, p, rng) {
-  const pt = randomSidewalkPoint(rng);
-  p.tx = pt.x;
-  p.ty = pt.y;
-  p.wait = 0;
+export function spawnPeds(G, n) {
+  for (let i = 0; i < n; i++) {
+    const s = randomSidewalkSpot(makeRng(G.seed + 3000 + i * 7 + G.pedsSpawned));
+    G.peds.push(makePed(G, s.x, s.y));
+  }
+  G.pedsSpawned += n;
 }
-
-export function scarePeds(G, x, y, radius) {
-  for (const p of G.peds) {
-    if (p.dead) continue;
-    if (dist(p.x, p.y, x, y) < radius) {
-      p.fleeing = true;
-      p.fleeTime = 2.5 + Math.random() * 2;
-      // Drop cash when startled.
-      if (p.hasCash) {
-        p.hasCash = false;
-        G.pickups.push({
-          x: p.x, y: p.y, kind: 'cash', amount: 10 + Math.floor(Math.random() * 40),
-          life: 25, bob: Math.random() * TAU,
-        });
-      }
+export function updatePed(G, ped, dt) {
+  if (ped.dead) return;
+  ped.walkPhase += dt * 8;
+  ped.panic = Math.max(0, ped.panic - dt);
+  const p = G.player;
+  const threat = G.shotsFiredRecently > 0 || (p.inCar && Math.abs(p.inCar.speed) > 150 && dist(ped.x, ped.y, p.inCar.x, p.inCar.y) < 130);
+  if (threat) ped.panic = 2;
+  let tx, ty, spd;
+  if (ped.panic > 0) {
+    const a = angleTo(p.x, p.y, ped.x, ped.y);
+    tx = ped.x + Math.cos(a) * 120;
+    ty = ped.y + Math.sin(a) * 120;
+    spd = 130;
+  } else {
+    if (!ped.target || dist(ped.x, ped.y, ped.target.x, ped.target.y) < 24) {
+      ped.waitT -= dt;
+      if (ped.waitT <= 0) { ped.target = pickTarget(G, ped); ped.waitT = rngRange(makeRng(ped.id * 7 + 1), 0, 2); }
+      return;
     }
+    tx = ped.target.x; ty = ped.target.y; spd = ped.speed;
   }
+  const a = angleTo(ped.x, ped.y, tx, ty);
+  ped.angle = a;
+  ped.x += Math.cos(a) * spd * dt;
+  ped.y += Math.sin(a) * spd * dt;
+  ped.x = clamp(ped.x, 16, G.worldW - 16);
+  ped.y = clamp(ped.y, 16, G.worldH - 16);
+  resolveCircle(G.city, ped, 10);
 }
-
-export function updatePeds(G, dt) {
-  const rng = G.pedRng;
-  const px = G.player.car ? G.player.car.x : G.player.x;
-  const py = G.player.car ? G.player.car.y : G.player.y;
-  const playerSpeed = G.player.car ? G.player.car.speed : 0;
-
-  for (const p of G.peds) {
-    if (p.dead) continue;
-    let speed = p.speed;
-    let tx = p.tx;
-    let ty = p.ty;
-
-    if (p.fleeing) {
-      p.fleeTime -= dt;
-      if (p.fleeTime <= 0) p.fleeing = false;
-      // Run away from the player.
-      const a = Math.atan2(p.y - py, p.x - px);
-      tx = p.x + Math.cos(a) * 200;
-      ty = p.y + Math.sin(a) * 200;
-      speed = PEDS.fleeSpeed;
-    } else if (p.wait > 0) {
-      p.wait -= dt;
-      continue;
-    } else if (dist(p.x, p.y, p.tx, p.ty) < 14) {
-      if (rng() < 0.3) {
-        p.wait = 1 + rng() * 3;
-      } else {
-        pickNewTarget(G, p, rng);
-      }
-      continue;
-    }
-
-    // A car speeding at a ped makes them jump aside.
-    if (playerSpeed > 300 && dist(p.x, p.y, px, py) < 110) {
-      p.fleeing = true;
-      p.fleeTime = 1.5;
-    }
-
-    const targetAngle = Math.atan2(ty - p.y, tx - p.x);
-    let d = targetAngle - p.angle;
-    while (d > Math.PI) d -= TAU;
-    while (d < -Math.PI) d += TAU;
-    p.angle += clamp(d, -3.5 * dt, 3.5 * dt);
-    const pos = { x: p.x, y: p.y };
-    pos.x += Math.cos(p.angle) * speed * dt;
-    pos.y += Math.sin(p.angle) * speed * dt;
-    pos.x = clamp(pos.x, 30, WORLD_W - 30);
-    pos.y = clamp(pos.y, 30, WORLD.beachY - 30);
-    collideCity(pos, 10, G.city);
-    p.x = pos.x;
-    p.y = pos.y;
-    p.walkPhase = (p.walkPhase || 0) + dt * speed * 0.09;
-  }
-
-  // Keep the streets populated: respawn far from the player when one dies.
-  if (G.peds.filter((p) => !p.dead).length < PEDS.count - 6) {
-    const pt = randomSidewalkPoint(rng);
-    if (dist(pt.x, pt.y, px, py) > 700) {
-      const p = makePed(pt.x, pt.y, rng);
-      pickNewTarget(G, p, rng);
-      G.peds.push(p);
-    }
-  }
-  // Prune the dead so the array stays short.
-  if (G.peds.length > PEDS.count + 20) {
-    G.peds = G.peds.filter((p) => !p.dead).slice(-PEDS.count);
+export function pedHitByCar(G, ped, car) {
+  if (ped.dead) return;
+  ped.hp -= 60;
+  ped.panic = 3;
+  G.playSfx('crash');
+  if (ped.hp <= 0) {
+    ped.dead = true;
+    G.player.kills++;
+    G.addWanted(1, 'Pedestrian down');
+    G.toast(ped.name + ' was hit. Witnesses called the PBPD.');
   }
 }
-
-/** A ped hit by a bullet or a speeding car. */
-export function killPed(G, p, byPlayer) {
-  if (p.dead) return;
-  p.dead = true;
-  for (let i = 0; i < 8; i++) {
-    G.particles.push({
-      x: p.x, y: p.y,
-      vx: (Math.random() - 0.5) * 160, vy: (Math.random() - 0.5) * 160,
-      life: 0.4 + Math.random() * 0.3, maxLife: 0.7,
-      size: 3 + Math.random() * 3, color: '#c0392b', kind: 'spark',
-    });
+export function nearestPed(G, x, y, maxD) {
+  let best = null; let bd = maxD * maxD;
+  for (const ped of G.peds) {
+    if (ped.dead) continue;
+    const d = dist(ped.x, ped.y, x, y);
+    if (d < bd) { bd = d; best = ped; }
   }
-  if (p.hasCash) {
-    p.hasCash = false;
-    G.pickups.push({
-      x: p.x, y: p.y, kind: 'cash', amount: 15 + Math.floor(Math.random() * 35),
-      life: 30, bob: 0,
-    });
-  }
-  if (byPlayer) {
-    G.stats.pedsDown = (G.stats.pedsDown || 0) + 1;
-    G.player.addHeat(1);
-    scarePeds(G, p.x, p.y, 320);
-  }
+  return best;
 }

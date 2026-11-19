@@ -1,66 +1,46 @@
-// Keyboard and mouse, read as a plain state object each frame.
-// Keys are tracked by `code` (KeyW, ArrowUp, Space, ...) so layouts don't matter.
-
-export class Input {
-  constructor(canvas) {
-    this.keys = new Set();
-    /** Keys pressed since the last frame was consumed. */
-    this.pressed = new Set();
-    this.mouseX = 0;
-    this.mouseY = 0;
-    this.mouseDown = false;
-    this.mouseClicked = false;
-    this.canvas = canvas;
-
-    window.addEventListener('keydown', (e) => {
-      if (e.repeat) return;
-      this.keys.add(e.code);
-      this.pressed.add(e.code);
-      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) {
-        e.preventDefault();
-      }
-    });
-    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
-    window.addEventListener('blur', () => {
-      this.keys.clear();
-      this.mouseDown = false;
-    });
-    canvas.addEventListener('mousemove', (e) => {
-      const r = canvas.getBoundingClientRect();
-      this.mouseX = e.clientX - r.left;
-      this.mouseY = e.clientY - r.top;
-    });
-    canvas.addEventListener('mousedown', (e) => {
-      if (e.button === 0) {
-        this.mouseDown = true;
-        this.mouseClicked = true;
-      }
-    });
-    window.addEventListener('mouseup', (e) => {
-      if (e.button === 0) this.mouseDown = false;
-    });
-    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-  }
-
-  down(...codes) {
-    return codes.some((c) => this.keys.has(c));
-  }
-
-  /** True once for the frame the key went down; call after reading it. */
-  wasPressed(...codes) {
-    return codes.some((c) => this.pressed.has(c));
-  }
-
-  /** End-of-frame housekeeping: forget this frame's presses and clicks. */
-  endFrame() {
-    this.pressed.clear();
-    this.mouseClicked = false;
-  }
-
-  /** Driving / walking axes, -1..1, from WASD or the arrow keys. */
-  axes() {
-    const x = (this.down('KeyD', 'ArrowRight') ? 1 : 0) - (this.down('KeyA', 'ArrowLeft') ? 1 : 0);
-    const y = (this.down('KeyS', 'ArrowDown') ? 1 : 0) - (this.down('KeyW', 'ArrowUp') ? 1 : 0);
-    return { x, y };
-  }
+// Palmira Bay — keyboard and mouse input, with edge-triggered presses.
+export function createInput(canvas) {
+  const input = {
+    keys: new Set(),
+    pressed: new Set(),
+    mouseX: 0, mouseY: 0, mouseDown: false, mousePressed: false,
+    anyKey: false,
+  };
+  const keyName = (e) => e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  window.addEventListener('keydown', (e) => {
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
+    const k = keyName(e);
+    if (!input.keys.has(k)) input.pressed.add(k);
+    input.keys.add(k);
+    input.anyKey = true;
+  });
+  window.addEventListener('keyup', (e) => input.keys.delete(keyName(e)));
+  window.addEventListener('blur', () => { input.keys.clear(); input.mouseDown = false; });
+  canvas.addEventListener('mousemove', (e) => {
+    const r = canvas.getBoundingClientRect();
+    input.mouseX = e.clientX - r.left;
+    input.mouseY = e.clientY - r.top;
+  });
+  canvas.addEventListener('mousedown', (e) => {
+    if (e.button === 0) { input.mouseDown = true; input.mousePressed = true; }
+  });
+  window.addEventListener('mouseup', () => { input.mouseDown = false; });
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  return input;
+}
+export function isDown(input, ...names) {
+  return names.some((n) => input.keys.has(n));
+}
+export function wasPressed(input, ...names) {
+  return names.some((n) => input.pressed.has(n));
+}
+export function endFrameInput(input) {
+  input.pressed.clear();
+  input.mousePressed = false;
+  input.anyKey = false;
+}
+export function axisInput(input) {
+  const x = (isDown(input, 'd', 'ArrowRight') ? 1 : 0) - (isDown(input, 'a', 'ArrowLeft') ? 1 : 0);
+  const y = (isDown(input, 's', 'ArrowDown') ? 1 : 0) - (isDown(input, 'w', 'ArrowUp') ? 1 : 0);
+  return { x, y };
 }

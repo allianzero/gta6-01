@@ -1,205 +1,154 @@
-// Combat: the player's pistol, enemy fire, and the pickups scattered around the
-// city (cash, health, armour). Bullets are simple rays stepped each frame.
+// Palmira Bay — combat: fists, pistols and SMGs, bullets, muzzle flashes,
+// gang enforcers who shoot back, and pickups.
+import { WEAPONS } from './config.js';
+import { dist, angleTo, clamp } from './util.js';
+import { makeRng, rngRange } from './rng.js';
+import { addXp } from './entities.js';
 
-import { COMBAT, WORLD_W, WORLD_H } from './config.js';
-import { dist, TAU } from './util.js';
-import { hitsBuilding } from './city.js';
-import { damageCar, spawnSparks } from './vehicles.js';
-import { killPed } from './pedestrians.js';
-import { damageEnemy } from './missions.js';
-
-/** Fire the player's pistol toward a world point. */
-export function playerShoot(G, wx, wy) {
-  const p = G.player;
-  if (p.fireCooldown > 0 || !p.onFoot) return;
-  p.fireCooldown = COMBAT.fireCooldown;
-  const angle = Math.atan2(wy - p.y, wx - p.x);
-  G.bullets.push({
-    x: p.x + Math.cos(angle) * 20, y: p.y + Math.sin(angle) * 20,
-    angle, speed: COMBAT.bulletSpeed, range: COMBAT.bulletRange,
-    travelled: 0, damage: COMBAT.bulletDamage, friendly: true, life: 1,
-  });
-  G.sound.gunshot();
-  G.particles.push({
-    x: p.x + Math.cos(angle) * 22, y: p.y + Math.sin(angle) * 22,
-    vx: 0, vy: 0, life: 0.07, maxLife: 0.07, size: 10, color: '#ffd23f', kind: 'flash',
-  });
-  p.addHeat(0); // Shooting is a crime only when it hits something or is seen.
-  G.stats.shotsFired = (G.stats.shotsFired || 0) + 1;
+export function weaponOf(player) {
+  return WEAPONS.find((w) => w.id === player.weapon) || WEAPONS[0];
 }
-
-export function updateBullets(G, dt) {
+export function switchWeapon(G, dir) {
   const p = G.player;
+  const i = p.weapons.indexOf(p.weapon);
+  const n = p.weapons[(i + dir + p.weapons.length) % p.weapons.length];
+  p.weapon = n;
+  G.playSfx('click');
+}
+export function playerShoot(G) {
+  const p = G.player;
+  const w = weaponOf(p);
+  if (p.shootCd > 0) return;
+  if (w.ammo > 0 && (p.ammo[w.id] || 0) <= 0) {
+    G.toast('No ammo for the ' + w.name + ' — visit Ammo & Sons.');
+    p.shootCd = 0.4;
+    return;
+  }
+  p.shootCd = w.rate;
+  if (w.ammo > 0) p.ammo[w.id]--;
+  const a = p.angle;
+  const spread = w.id === 'smg' ? 0.09 : 0.03;
+  const ang = a + (Math.random() - 0.5) * spread * 2;
+  G.bullets.push({
+    x: p.x + Math.cos(a) * 20, y: p.y + Math.sin(a) * 20,
+    vx: Math.cos(ang) * 620, vy: Math.sin(ang) * 620,
+    dmg: w.damage, range: w.range, travelled: 0, fromPlayer: true,
+  });
+  G.muzzle = 0.06;
+  G.playSfx('shot');
+  G.addWanted(0, '');
+  if (p.wanted < 1) { p.wanted = 1; G.toast('Shots fired! Someone called the PBPD.'); }
+  G.recentCrimeT = 3;
+  G.shotsFiredRecently = 1.5;
+}
+export function playerPunch(G) {
+  const p = G.player;
+  if (p.punchCd > 0) return;
+  p.punchCd = 0.35;
+  G.playSfx('punch');
+  G.punchAnim = 0.2;
+  const fx = p.x + Math.cos(p.angle) * 30;
+  const fy = p.y + Math.sin(p.angle) * 30;
+  for (const e of G.enemies) {
+    if (!e.dead && dist(e.x, e.y, fx, fy) < 40) damageEnemy(G, e, 12, true);
+  }
+  for (const ped of G.peds) {
+    if (!ped.dead && dist(ped.x, ped.y, fx, fy) < 36) {
+      ped.hp -= 20; ped.panic = 3;
+      if (ped.hp <= 0) { ped.dead = true; G.addWanted(1, 'Assault'); }
+    }
+  }
+}
+export function updateBullets(G, dt) {
   for (const b of G.bullets) {
-    const step = b.speed * dt;
-    b.x += Math.cos(b.angle) * step;
-    b.y += Math.sin(b.angle) * step;
-    b.travelled += step;
-    b.life -= dt;
-    if (b.life <= 0 || b.travelled > b.range) {
-      b.dead = true;
-      continue;
-    }
-    if (hitsBuilding(b.x, b.y, 2, G.city)) {
-      spawnSparks(G, b.x, b.y, 3);
-      b.dead = true;
-      continue;
-    }
-    if (b.x < 0 || b.x > WORLD_W || b.y < 0 || b.y > WORLD_H) {
-      b.dead = true;
-      continue;
-    }
-    if (b.friendly) {
-      // Hit a pedestrian?
+    b.x += b.vx * dt;
+    b.y += b.vy * dt;
+    b.travelled += Math.hypot(b.vx, b.vy) * dt;
+    if (b.travelled > b.range) { b.dead = true; continue; }
+    const hitB = G.city.buildings.find((bb) => b.x > bb.x && b.x < bb.x + bb.w && b.y > bb.y && b.y < bb.y + bb.h);
+    if (hitB) { b.dead = true; G.sparks.push({ x: b.x, y: b.y, t: 0 }); continue; }
+    if (b.fromPlayer) {
+      for (const e of G.enemies) {
+        if (!e.dead && dist(e.x, e.y, b.x, b.y) < 15) { damageEnemy(G, e, b.dmg, true); b.dead = true; break; }
+      }
+      if (b.dead) continue;
       for (const ped of G.peds) {
-        if (ped.dead) continue;
-        if (dist(b.x, b.y, ped.x, ped.y) < 14) {
-          killPed(G, ped, true);
-          b.dead = true;
-          break;
-        }
-      }
-      if (b.dead) continue;
-      // Hit an officer?
-      for (const cop of G.cops) {
-        if (cop.dead) continue;
-        if (dist(b.x, b.y, cop.x, cop.y) < 14) {
-          damageCop(G, cop, b.damage);
-          b.dead = true;
-          break;
-        }
-      }
-      if (b.dead) continue;
-      // Hit a rival gunner?
-      if (G.mission && G.mission.enemies) {
-        for (const e of G.mission.enemies) {
-          if (e.dead) continue;
-          if (dist(b.x, b.y, e.x, e.y) < 14) {
-            damageEnemy(G, e, b.damage);
-            b.dead = true;
-            break;
-          }
-        }
-      }
-      if (b.dead) continue;
-      // Hit a car?
-      for (const car of G.cars) {
-        if (car.dead) continue;
-        const dx = b.x - car.x;
-        const dy = b.y - car.y;
-        const along = dx * Math.cos(car.angle) + dy * Math.sin(car.angle);
-        const side = -dx * Math.sin(car.angle) + dy * Math.cos(car.angle);
-        if (Math.abs(along) < 34 && Math.abs(side) < 20) {
-          damageCar(G, car, b.damage);
-          spawnSparks(G, b.x, b.y, 4);
-          if (car.kind === 'police') p.addHeat(1);
-          b.dead = true;
-          break;
+        if (!ped.dead && dist(ped.x, ped.y, b.x, b.y) < 12) {
+          ped.hp -= b.dmg; ped.panic = 3;
+          if (ped.hp <= 0) { ped.dead = true; G.addWanted(1, 'Civilian shot'); }
+          b.dead = true; break;
         }
       }
     } else {
-      // Enemy fire: only the player can be hit.
-      if (p.onFoot && dist(b.x, b.y, p.x, p.y) < 13) {
-        damagePlayer(G, b.damage, 'shot');
+      const p = G.player;
+      if (!p.dead && !p.inCar && dist(p.x, p.y, b.x, b.y) < 14) {
         b.dead = true;
+        p.hp -= b.dmg;
+        p.hurtCd = 0.4;
+        G.floaters.push({ x: p.x, y: p.y - 20, text: '-' + b.dmg, color: '#ff5a4e', t: 0 });
+        if (p.hp <= 0) { p.hp = 0; p.dead = true; G.state = 'wasted'; G.stateTimer = 0; }
       }
     }
   }
   G.bullets = G.bullets.filter((b) => !b.dead);
 }
-
-export function damageCop(G, cop, amount) {
-  cop.health -= amount;
-  if (cop.health <= 0) {
-    cop.dead = true;
-    G.stats.copsDown = (G.stats.copsDown || 0) + 1;
-    G.player.addHeat(1);
-    for (let i = 0; i < 8; i++) {
-      G.particles.push({
-        x: cop.x, y: cop.y,
-        vx: (Math.random() - 0.5) * 160, vy: (Math.random() - 0.5) * 160,
-        life: 0.4, maxLife: 0.4, size: 3, color: '#c0392b', kind: 'spark',
-      });
+export function damageEnemy(G, e, dmg, byPlayer) {
+  e.hp -= dmg;
+  G.floaters.push({ x: e.x, y: e.y - 18, text: '-' + dmg, color: '#ffd94f', t: 0 });
+  G.sparks.push({ x: e.x, y: e.y, t: 0 });
+  if (e.hp <= 0 && !e.dead) {
+    e.dead = true;
+    if (byPlayer) {
+      G.player.kills++;
+      const gain = 25 + Math.floor(Math.random() * 30);
+      G.player.cash += gain;
+      addXp(G.player, 40);
+      G.floaters.push({ x: e.x, y: e.y - 30, text: '+' + gain + '$', color: '#7ae84f', t: 0 });
+      G.playSfx('cash');
     }
   }
 }
-
-/** Hurt the player; armour absorbs first. */
-export function damagePlayer(G, amount, cause) {
+export function spawnEnemy(G, x, y, kind) {
+  const rng = makeRng(G.seed + G.enemiesSpawned * 53);
+  const e = {
+    x, y, angle: rng() * 6.28, hp: kind === 'boss' ? 160 : 70,
+    kind: kind || 'thug', speed: rngRange(rng, 70, 100),
+    shootCd: rngRange(rng, 0.5, 1.5), dead: false, state: 'guard',
+    targetX: x, targetY: y,
+  };
+  G.enemies.push(e);
+  G.enemiesSpawned++;
+  return e;
+}
+export function updateEnemy(G, e, dt) {
+  if (e.dead) return;
   const p = G.player;
-  if (p.invulnerable > 0 || G.mode !== 'playing') return;
-  let rest = amount;
-  if (p.armor > 0) {
-    const absorbed = Math.min(p.armor, rest);
-    p.armor -= absorbed;
-    rest -= absorbed;
-  }
-  p.health -= rest;
-  p.invulnerable = 0.35;
-  G.camera.shake = Math.max(G.camera.shake, 4);
-  if (p.health <= 0) {
-    p.health = 0;
-    G.events.push(cause === 'busted' ? 'busted' : 'wasted');
+  const px = p.inCar ? p.inCar.x : p.x;
+  const py = p.inCar ? p.inCar.y : p.y;
+  const d = dist(e.x, e.y, px, py);
+  e.shootCd -= dt;
+  if (d < 380 && !p.dead) {
+    e.state = 'attack';
+    e.angle = angleTo(e.x, e.y, px, py);
+    if (d > 160) {
+      e.x += Math.cos(e.angle) * e.speed * dt;
+      e.y += Math.sin(e.angle) * e.speed * dt;
+    }
+    if (e.shootCd <= 0 && d < 340) {
+      e.shootCd = e.kind === 'boss' ? 0.7 : 1.3;
+      const a = e.angle + (Math.random() - 0.5) * 0.14;
+      G.bullets.push({ x: e.x + Math.cos(a) * 18, y: e.y + Math.sin(a) * 18, vx: Math.cos(a) * 480, vy: Math.sin(a) * 480, dmg: 9, range: 340, travelled: 0, fromPlayer: false });
+      G.playSfx('shot');
+    }
+  } else {
+    e.state = 'guard';
+    e.angle += dt * 0.4;
   }
 }
-
-/** Pickups: cash, health kits and armour, bobbing on the ground. */
-export function spawnPickup(G, x, y, kind, amount) {
-  G.pickups.push({ x, y, kind, amount, life: 60, bob: Math.random() * TAU });
-}
-
-export function updatePickups(G, dt) {
+export function giveWeapon(G, id, ammo) {
   const p = G.player;
-  for (const pk of G.pickups) {
-    pk.life -= dt;
-    pk.bob += dt * 3;
-    if (pk.life <= 0) {
-      pk.dead = true;
-      continue;
-    }
-    const d = dist(pk.x, pk.y, p.x, p.y);
-    if (d < 30) {
-      if (pk.kind === 'cash') {
-        p.cash += pk.amount;
-        G.stats.cashEarned = (G.stats.cashEarned || 0) + pk.amount;
-        G.sound.blip(990, 0.12, 0.3);
-        G.floaters.push({ x: pk.x, y: pk.y - 10, text: `+$${pk.amount}`, color: '#7dff9b', life: 1 });
-      } else if (pk.kind === 'health') {
-        p.health = Math.min(p.maxHealth, p.health + 50);
-        G.sound.blip(660, 0.15, 0.3);
-        G.floaters.push({ x: pk.x, y: pk.y - 10, text: '+50 HEALTH', color: '#3ddc74', life: 1 });
-      } else if (pk.kind === 'armor') {
-        p.armor = Math.min(100, p.armor + 50);
-        G.sound.blip(520, 0.15, 0.3);
-        G.floaters.push({ x: pk.x, y: pk.y - 10, text: '+50 ARMOUR', color: '#7fb8ff', life: 1 });
-      }
-      pk.dead = true;
-    }
-  }
-  G.pickups = G.pickups.filter((pk) => !pk.dead);
-}
-
-export function updateParticles(G, dt) {
-  for (const pt of G.particles) {
-    pt.life -= dt;
-    pt.x += pt.vx * dt;
-    pt.y += pt.vy * dt;
-    if (pt.kind === 'fire') {
-      pt.vx *= 1 - 2.2 * dt;
-      pt.vy *= 1 - 2.2 * dt;
-      pt.size = Math.max(1, pt.size - dt * 14);
-    } else if (pt.kind === 'smoke') {
-      pt.vy -= 12 * dt;
-      pt.size += dt * 10;
-    } else if (pt.kind === 'spark') {
-      pt.vx *= 1 - 3 * dt;
-      pt.vy *= 1 - 3 * dt;
-    }
-  }
-  G.particles = G.particles.filter((pt) => pt.life > 0);
-  for (const f of G.floaters) {
-    f.life -= dt;
-    f.y -= 34 * dt;
-  }
-  G.floaters = G.floaters.filter((f) => f.life > 0);
+  if (!p.weapons.includes(id)) p.weapons.push(id);
+  p.ammo[id] = (p.ammo[id] || 0) + ammo;
+  p.weapon = id;
+  G.toast('Picked up: ' + WEAPONS.find((w) => w.id === id).name + ' (' + ammo + ' rounds)');
 }

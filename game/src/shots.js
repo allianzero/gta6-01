@@ -1,135 +1,66 @@
-// Screenshot presets: `?shot=start|drive|chase|mission` sets the game up in a
-// fixed, seeded scene and warms the simulation up, so a screenshot shows the
-// game actually being played — traffic moving, police chasing, a job in progress.
-
-import { STEP } from './config.js';
-import { clamp } from './util.js';
+// Palmira Bay — screenshot staging: ?shot=start|drive|chase|mission puts the
+// live game into a fixed, readable scene for the entry's screenshots.
+// The game itself renders everything; this only chooses the setup.
 import { makeCar } from './vehicles.js';
 import { startMission } from './missions.js';
-import { updateGame } from './world.js';
-
-/** A fake input: still by default, holding the throttle when `driving`. */
-function fakeInput(mouseX = 640, mouseY = 360, driving = false) {
-  return {
-    axes: () => (driving ? { x: 0, y: -1 } : { x: 0, y: 0 }),
-    down: () => false,
-    wasPressed: () => false,
-    mouseDown: false,
-    mouseX,
-    mouseY,
-    endFrame: () => {},
-  };
-}
-
-function warmUp(G, frames, input) {
-  for (let i = 0; i < frames; i++) {
-    G.mode = 'playing';
-    updateGame(G, STEP, input || fakeInput());
-  }
-}
-
-/** Put the player in a car on a long straight street, already moving. */
-function putPlayerInCar(G, x, y, angle, speed) {
-  const p = G.player;
-  // Find the parked car the world spawns by the start, or the nearest car.
-  let car = G.cars.find((c) => c.kind === 'traffic' && c.cruise === 0);
-  if (!car) car = G.cars.find((c) => c.kind === 'traffic');
-  if (!car) return null;
-  car.kind = 'player';
-  car.driver = 'player';
-  car.x = x;
-  car.y = y;
-  car.angle = angle;
-  car.vx = Math.cos(angle) * speed;
-  car.vy = Math.sin(angle) * speed;
-  car.speed = speed;
-  car.health = 100;
-  p.car = car;
-  p.onFoot = false;
-  p.x = x;
-  p.y = y;
-  p.angle = angle;
-  G.camera.x = x;
-  G.camera.y = y;
-  G.camera.zoom = 0.85;
-  return car;
-}
-
-function spawnPoliceNear(G, x, y, offsets) {
-  for (const [dx, dy] of offsets) {
-    const car = makeCar(x + dx, y + dy, Math.atan2(-dy, -dx), '#2b4acb', 'police');
-    car.driver = 'police';
-    car.cruise = 660;
-    car.health = 120;
-    car.maxHealth = 120;
-    G.cars.push(car);
-  }
-}
+import { spawnEnemy } from './combat.js';
 
 export function applyShot(G, shot) {
-  G.shotMode = shot;
   const p = G.player;
-
   if (shot === 'start') {
-    // Title over a living city: traffic already moving around a busy crossroads.
-    G.camera.x = 1980;
-    G.camera.y = 1980;
-    G.camera.zoom = 0.8;
-    warmUp(G, 240);
-    G.mode = 'title';
-    G.camera.x = 1980;
-    G.camera.y = 1980;
+    G.state = 'menu';
+    G.menuSel = 0;
     return;
   }
-
+  G.state = 'playing';
   if (shot === 'drive') {
-    startMission(G, 0);
-    putPlayerInCar(G, 900, 2010, 0, 380);
-    warmUp(G, 90, fakeInput(640, 360, true));
+    p.x = 900; p.y = 1320; p.angle = 0; // right-hand eastbound lane
+    const car = makeCar('sport', 900, 1320, 0, {}); // Vortex GT, right lane
+    car.speed = 180;
+    G.cars.push(car);
+    p.inCar = car;
+    p.cash = 1240;
+    G.camera.x = p.x - G.vw / 2;
+    G.camera.y = p.y - G.vh / 2;
+    G.toast('Driving the Vortex GT down the Neon Strip.');
     return;
   }
-
   if (shot === 'chase') {
-    startMission(G, 0);
-    putPlayerInCar(G, 1500, 2010, 0, 420);
-    p.addHeat(3);
-    spawnPoliceNear(G, 1500, 2010, [[-420, -160], [-520, 120], [380, -220]]);
-    warmUp(G, 150, fakeInput(640, 360, true));
-    return;
-  }
-
-  if (shot === 'mission') {
-    // Rook on foot, gun out, facing the rival crew at a crossroads.
-    p.x = 1500;
-    p.y = 1500;
-    p.angle = Math.PI / 4;
-    G.camera.x = 1500;
-    G.camera.y = 1500;
-    G.camera.zoom = 0.95;
-    startMission(G, 5);
-    // Bring the crew into view: lined up down the street east of the player.
-    (G.mission.enemies || []).forEach((e, i) => {
-      e.x = p.x + 190 + i * 58;
-      e.y = p.y + 26 + (i % 2) * 34;
-    });
-    // Warm up so the crew opens fire and the scene is mid-action.
-    warmUp(G, 45);
-    // Aim at the nearest living gunner and fire a few shots.
-    const enemy = (G.mission.enemies || []).find((e) => !e.dead);
-    if (enemy) {
-      const cam = G.camera;
-      const sx = (enemy.x - cam.x) * cam.zoom + G.viewW / 2;
-      const sy = (enemy.y - cam.y) * cam.zoom + G.viewH / 2;
-      const input = fakeInput(clamp(sx, 0, G.viewW), clamp(sy, 0, G.viewH));
-      input.mouseDown = true;
-      warmUp(G, 8, input);
-      input.mouseDown = false;
+    p.x = 900; p.y = 1320; p.angle = 0; // right-hand eastbound lane
+    const car = makeCar('sport', 900, 1320, 0, {}); // getaway car, right lane
+    car.speed = 240;
+    G.cars.push(car);
+    p.inCar = car;
+    p.wanted = 3;
+    p.cash = 3120;
+    for (let i = 0; i < 3; i++) {
+      const cop = makeCar('cop', 900 - 150 - i * 110, 1320 + (i % 2) * 56 - 28, 0, {}); // PBPD in pursuit
+      cop.isCop = true;
+      cop.speed = 380;
+      G.cars.push(cop);
     }
+    G.camera.x = p.x - G.vw / 2;
+    G.camera.y = p.y - G.vh / 2;
+    G.toast('WANTED 3★ — the PBPD is on your tail!');
     return;
   }
-
-  // Unknown shot name: play normally from the title.
-  G.mode = 'title';
+  if (shot === 'mission') {
+    p.x = 560; p.y = 2128; p.angle = -0.6;
+    p.cash = 860;
+    p.weapon = 'pistol';
+    if (!p.weapons.includes('pistol')) p.weapons.push('pistol');
+    p.ammo.pistol = 24;
+    G.missions.index = 3;
+    startMission(G);
+    // walk to the docks step, then spawn the Vipers for the fight
+    G.missions.step = 1;
+    G.missions.stepText = 'Take out the Vipers (4 left)';
+    G.missions.killsLeft = 4;
+    for (let i = 0; i < 4; i++) spawnEnemy(G, 470 + (i % 2) * 110 - 55, 2128 + Math.floor(i / 2) * 80 - 40, i === 3 ? 'boss' : 'thug');
+    G.camera.x = p.x - G.vw / 2;
+    G.camera.y = p.y - G.vh / 2;
+    G.toast('MISSION: Payback — clear the Vipers at the South Docks.');
+    return;
+  }
+  G.state = 'menu';
 }
-
-export { fakeInput };

@@ -1,355 +1,164 @@
-// Missions and story: six jobs for Marco "Rook" Santana, from his first stolen
-// car to the King of Palmira. Each mission is a list of steps — go somewhere,
-// steal a car, collect packages, survive the heat, outrun a timer, or take out
-// a rival crew — with a cash reward at the end.
+// Palmira Bay — story missions: five chapters for Rosa's crew, from a first
+// stolen sedan to the Coral Bank score. Each mission is a small state machine.
+import { dist } from './util.js';
+import { spawnEnemy } from './combat.js';
+import { addWanted, clearWanted } from './police.js';
+import { nearestCar } from './vehicles.js';
 
-import { MISSIONS } from './config.js';
-import { makeRng, range } from './rng.js';
-import { dist, formatTime } from './util.js';
-import { randomStreetPoint, randomSidewalkPoint } from './city.js';
-
-const STORY = {
-  intro: 'Palmira Bay, 2026. Marco "Rook" Santana is back in town with nothing but a burner phone and a debt. Six jobs stand between him and the crown.',
-  outro: 'The crown is yours, Rook. Palmira Bay belongs to the King now — free roam, no more jobs, just the city.',
-};
-
-export function missionCount() {
-  return MISSIONS.length;
+export const STORY_INTRO = 'Rosa needs a driver. Palmira Bay is yours — take it, one job at a time.';
+export const MISSION_DEFS = [
+  {
+    id: 'm1', title: 'First Wheels', giver: 'Rosa',
+    brief: 'Rosa needs wheels. Steal any parked car and bring it to the Mango Motel.',
+    reward: 200, steps: [
+      { type: 'stealCar', text: 'Steal a car (walk up to one and press E)' },
+      { type: 'goto', x: 700, y: 2100, r: 90, text: 'Drive the car to the Mango Motel' },
+    ],
+  },
+  {
+    id: 'm2', title: 'Courier Run', giver: 'Rosa',
+    brief: 'A package for the Coral Crown Casino. Fast, quiet, no cops. 90 seconds.',
+    reward: 350, steps: [
+      { type: 'goto', x: 1560, y: 180, r: 90, text: 'Deliver the package to the Coral Crown Casino', timer: 90 },
+    ],
+  },
+  {
+    id: 'm3', title: 'Heat Wave', giver: 'Dante',
+    brief: 'Dante rattled the PBPD. Lose a 3-star wanted level — hide, don\'t fight.',
+    reward: 400, steps: [
+      { type: 'heat', stars: 3, text: 'Survive the heat, then lose the cops (3 stars)' },
+      { type: 'loseHeat', text: 'Lose the wanted level completely' },
+    ],
+  },
+  {
+    id: 'm4', title: 'Payback', giver: 'Rosa',
+    brief: 'The Vipers jumped our courier at the docks. Clear them out — all four.',
+    reward: 600, steps: [
+      { type: 'goto', x: 500, y: 2200, r: 110, text: 'Reach the South Docks' },
+      { type: 'kill', count: 4, text: 'Take out the Vipers (4 left)' },
+    ],
+  },
+  {
+    id: 'm5', title: 'The Big Score', giver: 'Rosa',
+    brief: 'Coral Bank, noon. Grab the cash, then shake a 3-star chase to the pier.',
+    reward: 1500, steps: [
+      { type: 'goto', x: 1750, y: 1150, r: 90, text: 'Reach the Coral Bank' },
+      { type: 'grab', text: 'Grab the cash (press E at the bank doors)' },
+      { type: 'goto', x: 3300, y: 1400, r: 100, text: 'Escape to Bayview Pier with the cash' },
+    ],
+  },
+];
+export function createMissions() {
+  return { index: 0, active: null, step: 0, timer: 0, killsLeft: 0, done: [], failed: false };
 }
-
-export function missionName(index) {
-  return MISSIONS[index] ? MISSIONS[index].name : 'Free Roam';
+export function currentMission(missions) {
+  return MISSION_DEFS[missions.index] || null;
 }
-
-export function missionReward(index) {
-  return MISSIONS[index] ? MISSIONS[index].reward : 0;
+export function startMission(G) {
+  const def = currentMission(G.missions);
+  if (!def || G.missions.active) return;
+  G.missions.active = def;
+  G.missions.step = 0;
+  G.missions.timer = 0;
+  G.missions.killsLeft = 0;
+  G.missions.failed = false;
+  enterStep(G, def.steps[0]);
+  G.toast('MISSION: ' + def.title + ' — ' + def.brief);
+  G.playSfx('mission');
 }
-
-/** Build the step list for a mission, with markers picked from a seeded rng. */
-function buildSteps(G, index) {
-  const rng = makeRng(G.seed + 5000 + index * 1013);
-  const p = G.player;
-  const far = () => {
-    let pt = randomStreetPoint(rng);
-    for (let tries = 0; tries < 12 && dist(pt.x, pt.y, p.x, p.y) < 900; tries++) {
-      pt = randomStreetPoint(rng);
-    }
-    return pt;
-  };
-  const near = () => {
-    let pt = randomSidewalkPoint(rng);
-    for (let tries = 0; tries < 12 && dist(pt.x, pt.y, p.x, p.y) < 500; tries++) {
-      pt = randomSidewalkPoint(rng);
-    }
-    return pt;
-  };
-
-  switch (index) {
-    case 0: {
-      const marina = far();
-      return [
-        { type: 'enterCar', text: 'Steal a car — walk up to one and press E' },
-        { type: 'goto', x: marina.x, y: marina.y, radius: 110, text: 'Drive to the Marina' },
-      ];
-    }
-    case 1: {
-      const alley = near();
-      const hotel = far();
-      return [
-        { type: 'goto', x: alley.x, y: alley.y, radius: 70, text: 'Pick up the package in the alley' },
-        { type: 'goto', x: hotel.x, y: hotel.y, radius: 110, text: 'Deliver the package to the hotel' },
-      ];
-    }
-    case 2:
-      return [
-        { type: 'wanted', stars: 2, text: 'The cops are on to you — get spotted' },
-        { type: 'survive', seconds: 45, text: 'Lose the heat: survive 45 seconds' },
-      ];
-    case 3: {
-      const stops = [far(), far(), far()];
-      return [
-        { type: 'collect', count: 3, stops, collected: 0, text: 'Collect the three drops' },
-      ];
-    }
-    case 4: {
-      const hideout = far();
-      return [
-        { type: 'wanted', stars: 3, text: 'Grab a car — the cops are already coming' },
-        { type: 'timedGoto', x: hideout.x, y: hideout.y, radius: 110, seconds: 100, text: 'Reach the hideout before the timer runs out' },
-      ];
-    }
-    case 5: {
-      const crew = near();
-      const party = far();
-      return [
-        { type: 'eliminate', count: 4, at: crew, text: 'Take out the rival crew (4 gunners)' },
-        { type: 'goto', x: party.x, y: party.y, radius: 110, text: 'Reach the rooftop party' },
-      ];
-    }
-    default:
-      return [];
-  }
-}
-
-export function startMission(G, index) {
-  const steps = buildSteps(G, index);
-  G.mission = {
-    index,
-    stepIndex: 0,
-    steps,
-    active: true,
-    failed: false,
-    failTimer: 0,
-    timer: 0,
-    enemies: [],
-    banner: null,
-  };
-  const step = steps[0];
-  if (step) enterStep(G, step);
-  showBanner(G, `MISSION ${index + 1}: ${missionName(index)}`, step ? step.text : '');
-}
-
-export function showBanner(G, title, sub) {
-  G.banner = { title, sub, until: G.time + 4 };
-}
-
 function enterStep(G, step) {
-  const p = G.player;
-  if (step.type === 'wanted') {
-    p.wanted = Math.max(p.wanted, step.stars);
-    p.lastCrimeAt = G.time;
-    p.addHeat(0);
-  }
-  if (step.type === 'survive') {
-    G.mission.timer = step.seconds;
-  }
-  if (step.type === 'timedGoto') {
-    G.mission.timer = step.seconds;
-  }
-  if (step.type === 'collect') {
-    spawnCollectMarker(G, step);
-  }
-  if (step.type === 'eliminate') {
-    spawnCrew(G, step);
-  }
-}
-
-function spawnCollectMarker(G, step) {
-  const stop = step.stops[step.collected];
-  if (!stop) return;
-  G.pickups.push({
-    x: stop.x, y: stop.y, kind: 'drop', amount: 0,
-    life: 600, bob: 0, mission: true,
-  });
-}
-
-function spawnCrew(G, step) {
-  const rng = makeRng(G.seed + 9100 + G.mission.index);
-  G.mission.enemies = [];
-  for (let i = 0; i < step.count; i++) {
-    const x = step.at.x + range(rng, -90, 90);
-    const y = step.at.y + range(rng, -90, 90);
-    G.mission.enemies.push({
-      x, y, angle: rng() * Math.PI * 2,
-      health: 60, shootCooldown: 0.5 + rng(), dead: false, walkPhase: 0,
-    });
-  }
-}
-
-function advanceStep(G) {
-  const m = G.mission;
-  m.stepIndex++;
-  if (m.stepIndex >= m.steps.length) {
-    completeMission(G);
-    return;
-  }
-  const step = m.steps[m.stepIndex];
-  enterStep(G, step);
-  showBanner(G, missionName(m.index), step.text);
-}
-
-function completeMission(G) {
-  const m = G.mission;
-  const reward = missionReward(m.index);
-  const p = G.player;
-  p.cash += reward;
-  G.stats.cashEarned = (G.stats.cashEarned || 0) + reward;
-  G.stats.missionsDone = (G.stats.missionsDone || 0) + 1;
-  G.save.cash = p.cash;
-  G.save.missionsDone = m.index + 1;
-  G.sound.jingle();
-  showBanner(G, 'MISSION PASSED', `+$${reward.toLocaleString('en-US')} — ${missionName(m.index)}`);
-  G.floaters.push({ x: p.x, y: p.y - 30, text: `+$${reward}`, color: '#7dff9b', life: 1.6 });
-  m.active = false;
-  m.completedAt = G.time;
-  // The next job starts after a breath.
-  m.nextAt = G.time + 3.5;
-}
-
-export function failMission(G, reason) {
-  const m = G.mission;
-  if (!m.active || m.failed) return;
-  m.failed = true;
-  m.failTimer = 3;
-  showBanner(G, 'MISSION FAILED', reason);
-  G.sound.blip(180, 0.4, 0.4);
-}
-
-export function updateMissions(G, dt) {
-  const m = G.mission;
-  if (!m) return;
-
-  // Between missions: start the next one, or free roam after the last.
-  if (!m.active) {
-    if (m.nextAt && G.time >= m.nextAt) {
-      m.nextAt = null;
-      if (m.index + 1 < MISSIONS.length) {
-        startMission(G, m.index + 1);
-      } else if (!m.allDoneShown) {
-        m.allDoneShown = true;
-        showBanner(G, 'KING OF PALMIRA', STORY.outro);
-        G.events.push('allMissionsDone');
-      }
-    }
-    return;
-  }
-  if (m.failed) {
-    m.failTimer -= dt;
-    if (m.failTimer <= 0) {
-      m.failed = false;
-      startMission(G, m.index);
-    }
-    return;
-  }
-
-  const step = m.steps[m.stepIndex];
   if (!step) return;
+  if (step.type === 'heat') addWanted(G, step.stars, 'Dante rattled the PBPD');
+  if (step.type === 'kill') {
+    G.missions.killsLeft = step.count;
+    const cx = 500, cy = 2200;
+    for (let i = 0; i < step.count; i++) spawnEnemy(G, cx + (i % 2) * 90 - 45, cy + Math.floor(i / 2) * 80 - 40, i === 3 ? 'boss' : 'thug');
+  }
+  if (step.timer) G.missions.timer = step.timer;
+  G.missions.stepText = step.text;
+}
+export function updateMissions(G, dt) {
+  const M = G.missions;
+  if (!M.active) return;
+  const def = M.active;
+  const step = def.steps[M.step];
+  if (!step) { completeMission(G); return; }
   const p = G.player;
-  const px = p.car ? p.car.x : p.x;
-  const py = p.car ? p.car.y : p.y;
-
+  if (step.timer) {
+    M.timer -= dt;
+    if (M.timer <= 0) { failMission(G, 'Out of time!'); return; }
+  }
   switch (step.type) {
-    case 'enterCar':
-      if (p.car) advanceStep(G);
+    case 'stealCar':
+      if (p.inCar) nextStep(G);
       break;
-    case 'goto':
-      if (dist(px, py, step.x, step.y) < step.radius) advanceStep(G);
-      break;
-    case 'timedGoto':
-      m.timer -= dt;
-      if (dist(px, py, step.x, step.y) < step.radius) advanceStep(G);
-      else if (m.timer <= 0) failMission(G, 'Too slow — the hideout went cold.');
-      break;
-    case 'survive': {
-      m.timer -= dt;
-      if (m.timer <= 0 || p.wanted === 0) advanceStep(G);
+    case 'goto': {
+      const x = p.inCar ? p.inCar.x : p.x;
+      const y = p.inCar ? p.inCar.y : p.y;
+      if (dist(x, y, step.x, step.y) < step.r) nextStep(G);
       break;
     }
-    case 'wanted':
-      if (p.wanted >= step.stars) advanceStep(G);
+    case 'heat':
+      if (p.wanted >= step.stars) nextStep(G);
       break;
-    case 'collect': {
-      // A drop is collected by walking or driving over its marker.
-      const stop = step.stops[step.collected];
-      if (stop && dist(px, py, stop.x, stop.y) < 60) {
-        step.collected++;
-        G.pickups = G.pickups.filter((pk) => !(pk.mission && pk.x === stop.x && pk.y === stop.y));
-        G.sound.blip(990, 0.12, 0.3);
-        G.floaters.push({ x: stop.x, y: stop.y - 10, text: `DROP ${step.collected}/3`, color: '#ffd23f', life: 1 });
-        if (step.collected >= step.count) advanceStep(G);
-        else spawnCollectMarker(G, step);
-      }
+    case 'loseHeat':
+      if (p.wanted === 0) nextStep(G);
+      break;
+    case 'kill': {
+      const left = G.enemies.filter((e) => !e.dead).length;
+      M.killsLeft = left;
+      M.stepText = 'Take out the Vipers (' + left + ' left)';
+      if (left === 0) nextStep(G);
       break;
     }
-    case 'eliminate': {
-      const alive = m.enemies.filter((e) => !e.dead).length;
-      if (alive === 0) advanceStep(G);
+    case 'grab':
+      if (M.grabbed) nextStep(G);
       break;
-    }
-    default:
-      break;
-  }
-
-  updateEnemies(G, dt);
-}
-
-/** The rival crew: armed, stationary-ish, shooting at the player. */
-export function updateEnemies(G, dt) {
-  const m = G.mission;
-  if (!m || !m.enemies) return;
-  const p = G.player;
-  for (const e of m.enemies) {
-    if (e.dead) continue;
-    const d = dist(e.x, e.y, p.x, p.y);
-    e.angle = Math.atan2(p.y - e.y, p.x - e.x);
-    e.shootCooldown -= dt;
-    if (d < 380 && e.shootCooldown <= 0 && G.mode === 'playing') {
-      e.shootCooldown = 0.8 + Math.random() * 0.8;
-      const spread = 0.1 + d / 3000;
-      const a = e.angle + (Math.random() - 0.5) * 2 * spread;
-      G.bullets.push({
-        x: e.x + Math.cos(a) * 18, y: e.y + Math.sin(a) * 18,
-        angle: a, speed: 780, range: 460, travelled: 0,
-        damage: 8, friendly: false, life: 1.2,
-      });
-      G.sound.gunshot();
-    }
+    default: break;
   }
 }
-
-/** Damage one of the mission's enemies; returns true when it died. */
-export function damageEnemy(G, e, amount) {
-  e.health -= amount;
-  if (e.health <= 0 && !e.dead) {
-    e.dead = true;
-    for (let i = 0; i < 8; i++) {
-      G.particles.push({
-        x: e.x, y: e.y,
-        vx: (Math.random() - 0.5) * 160, vy: (Math.random() - 0.5) * 160,
-        life: 0.4, maxLife: 0.4, size: 3, color: '#c0392b', kind: 'spark',
-      });
-    }
-    return true;
-  }
-  return false;
+export function nextStep(G) {
+  const M = G.missions;
+  M.step++;
+  const def = M.active;
+  if (M.step >= def.steps.length) { completeMission(G); return; }
+  enterStep(G, def.steps[M.step]);
+  G.playSfx('pickup');
 }
-
-/** The current objective line for the HUD, or null in free roam. */
-export function objectiveText(G) {
-  const m = G.mission;
-  if (!m || !m.active || m.failed) return null;
-  const step = m.steps[m.stepIndex];
-  if (!step) return null;
-  let text = step.text;
-  if (step.type === 'survive' || step.type === 'timedGoto') {
-    text += ` — ${formatTime(m.timer)}`;
-  }
-  if (step.type === 'collect') {
-    text += ` (${step.collected}/${step.count})`;
-  }
-  if (step.type === 'eliminate') {
-    const alive = m.enemies.filter((e) => !e.dead).length;
-    text += ` (${step.count - alive}/${step.count})`;
-  }
-  return text;
+export function missionMarker(G) {
+  const M = G.missions;
+  if (!M.active) return null;
+  const step = M.active.steps[M.step];
+  if (!step || step.x === undefined) return null;
+  return { x: step.x, y: step.y, r: step.r || 90 };
 }
-
-/** The world position the HUD arrow and minimap should point at, or null. */
-export function objectiveMarker(G) {
-  const m = G.mission;
-  if (!m || !m.active || m.failed) return null;
-  const step = m.steps[m.stepIndex];
-  if (!step) return null;
-  if (step.type === 'goto' || step.type === 'timedGoto') return { x: step.x, y: step.y };
-  if (step.type === 'collect') {
-    const stop = step.stops[step.collected];
-    return stop ? { x: stop.x, y: stop.y } : null;
+export function completeMission(G) {
+  const M = G.missions;
+  const def = M.active;
+  G.player.cash += def.reward;
+  G.player.missionsDone++;
+  G.player.respect += 20;
+  M.done.push(def.id);
+  M.active = null;
+  M.index++;
+  G.toast('MISSION COMPLETE: ' + def.title + ' — +' + def.reward + '$');
+  G.playSfx('cash');
+  G.banner = { title: 'MISSION COMPLETE', sub: def.title + '  •  +' + def.reward + '$', t: 3 };
+  if (M.index >= MISSION_DEFS.length) {
+    G.banner = { title: 'PALMIRA BAY IS YOURS', sub: 'All five chapters done. Free roam, bray — the city never sleeps.', t: 5 };
   }
-  if (step.type === 'eliminate') {
-    const alive = m.enemies.find((e) => !e.dead);
-    return alive ? { x: alive.x, y: alive.y } : null;
-  }
-  return null;
 }
-
-export { STORY };
+export function failMission(G, why) {
+  const M = G.missions;
+  M.active = null;
+  M.failed = true;
+  G.toast('MISSION FAILED: ' + why + ' — talk to Rosa to retry.');
+  G.playSfx('fail');
+  G.banner = { title: 'MISSION FAILED', sub: why, t: 3 };
+  clearWanted(G);
+}
+export function missionGiverPos(G) {
+  const def = currentMission(G.missions);
+  if (!def) return null;
+  return { x: 1450, y: 1250, name: def.giver };
+}

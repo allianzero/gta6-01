@@ -1,88 +1,48 @@
-// Small pure helpers shared by every system: angles, distances, circle-vs-rect
-// collision. Nothing here touches game state, so nothing here can cycle-import.
-
-export const TAU = Math.PI * 2;
-
-export function clamp(v, min, max) {
-  return v < min ? min : v > max ? max : v;
-}
-
-export function lerp(a, b, t) {
-  return a + (b - a) * t;
-}
-
-export function dist2(ax, ay, bx, by) {
-  const dx = bx - ax;
-  const dy = by - ay;
-  return dx * dx + dy * dy;
-}
-
-export function dist(ax, ay, bx, by) {
-  return Math.hypot(bx - ax, by - ay);
-}
-
-/** Shortest signed turn from angle `from` to angle `to`, in (-PI, PI]. */
-export function angleDiff(from, to) {
-  let d = (to - from) % TAU;
-  if (d > Math.PI) d -= TAU;
-  if (d <= -Math.PI) d += TAU;
+// Palmira Bay — small pure helpers shared by every system.
+export function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+export function lerp(a, b, t) { return a + (b - a) * t; }
+export function dist2(ax, ay, bx, by) { const dx = bx - ax; const dy = by - ay; return dx * dx + dy * dy; }
+export function dist(ax, ay, bx, by) { return Math.sqrt(dist2(ax, ay, bx, by)); }
+export function angleTo(ax, ay, bx, by) { return Math.atan2(by - ay, bx - ax); }
+export function angleDiff(a, b) {
+  let d = b - a;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
   return d;
 }
-
-/** Move `from` toward `to` by at most `maxStep` radians. */
-export function angleApproach(from, to, maxStep) {
-  const d = angleDiff(from, to);
-  if (Math.abs(d) <= maxStep) return to;
-  return from + Math.sign(d) * maxStep;
+export function turnToward(a, target, maxStep) {
+  const d = angleDiff(a, target);
+  return a + clamp(d, -maxStep, maxStep);
 }
-
-export function pointInRect(x, y, r) {
-  return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
+export function rectsOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
+  return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
 }
-
-/**
- * Push a circle (x, y, radius) out of a rectangle. Mutates `pos` in place and
- * returns true when a push happened. The circle slides along the rect's faces.
- */
-export function circleRectResolve(pos, radius, r) {
-  const cx = clamp(pos.x, r.x, r.x + r.w);
-  const cy = clamp(pos.y, r.y, r.y + r.h);
-  const dx = pos.x - cx;
-  const dy = pos.y - cy;
-  const d2 = dx * dx + dy * dy;
-  if (d2 >= radius * radius) return false;
-  if (d2 > 0.0001) {
-    const d = Math.sqrt(d2);
-    pos.x = cx + (dx / d) * radius;
-    pos.y = cy + (dy / d) * radius;
-  } else {
-    // Centre inside the rect: push out along the smallest penetration.
-    const left = pos.x - r.x;
-    const right = r.x + r.w - pos.x;
-    const top = pos.y - r.y;
-    const bottom = r.y + r.h - pos.y;
-    const m = Math.min(left, right, top, bottom);
-    if (m === left) pos.x = r.x - radius;
-    else if (m === right) pos.x = r.x + r.w + radius;
-    else if (m === top) pos.y = r.y - radius;
-    else pos.y = r.y + r.h + radius;
-  }
-  return true;
+export function circleRect(cx, cy, r, rx, ry, rw, rh) {
+  const nx = clamp(cx, rx, rx + rw);
+  const ny = clamp(cy, ry, ry + rh);
+  return dist2(cx, cy, nx, ny) < r * r;
 }
-
-/** True when two circles overlap. */
-export function circlesOverlap(a, b) {
-  const rr = a.r + b.r;
-  return dist2(a.x, a.y, b.x, b.y) < rr * rr;
+export function fmtMoney(n) { return '$' + Math.floor(n).toLocaleString('en-US'); }
+export function fmtTime(sec) {
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
 }
-
-/** Format seconds as M:SS. */
-export function formatTime(seconds) {
-  const s = Math.max(0, Math.ceil(seconds));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+export function fmtClock(dayT) {
+  const h = Math.floor(6 + dayT * 24) % 24;
+  const m = Math.floor(((6 + dayT * 24) % 1) * 60);
+  return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
 }
-
-/** Format dollars with commas: 1500 -> $1,500. */
-export function formatCash(n) {
-  return '$' + Math.round(n).toLocaleString('en-US');
+export function pick(arr, rng) { return arr[Math.floor(rng() * arr.length)]; }
+export function shade(hex, f) {
+  const n = parseInt(hex.slice(1), 16);
+  const r = clamp(Math.round(((n >> 16) & 255) * f), 0, 255);
+  const g = clamp(Math.round(((n >> 8) & 255) * f), 0, 255);
+  const b = clamp(Math.round((n & 255) * f), 0, 255);
+  return `rgb(${r},${g},${b})`;
+}
+export function hashStr(s) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
 }

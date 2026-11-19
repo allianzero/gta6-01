@@ -1,190 +1,62 @@
-// Palmira Bay itself: a sun-soaked coastal city of 8x8 blocks, generated once from
-// the fixed seed, so the map is identical on every load. Streets run on a grid;
-// blocks hold buildings, parks or parking lots; the south edge is beach and ocean.
+// Palmira Bay — named places, shops and street life data: landmarks, stores,
+// safehouses and the traffic-light clock. All names are original.
+import { makeRng, rngChoice } from './rng.js';
+import { WORLD_W, WORLD_H } from './config.js';
 
-import { WORLD, WORLD_W, WORLD_H, BUILDING_COLORS } from './config.js';
-import { makeRng, int, range, pick } from './rng.js';
-import { clamp, pointInRect, circleRectResolve } from './util.js';
+export const LANDMARKS = [
+  { name: 'Coral Crown Casino', x: 1560, y: 180, kind: 'casino' },
+  { name: 'Bayview Pier', x: 3300, y: 1400, kind: 'pier' },
+  { name: 'Palmira Stadium', x: 2900, y: 2300, kind: 'stadium' },
+  { name: 'Harbor Lighthouse', x: 200, y: 200, kind: 'lighthouse' },
+  { name: 'Sunset Mall', x: 1900, y: 1500, kind: 'mall' },
+  { name: 'PBPD HQ', x: 1500, y: 1150, kind: 'police' },
+  { name: 'Coral Bank', x: 1750, y: 1150, kind: 'bank' },
+  { name: 'Mango Motel', x: 700, y: 2100, kind: 'motel' },
+];
 
-/** Street centre lines, in pixels, for both axes. */
-export function streetCenters() {
-  const centers = [];
-  const step = WORLD.block + WORLD.road;
-  for (let i = 0; i <= WORLD.grid; i++) centers.push(i * step + WORLD.road / 2);
-  return centers;
-}
+export const SHOPS = [
+  { name: 'Taco Luna', x: 950, y: 500, kind: 'food', price: 12, heal: 30 },
+  { name: 'Burger Bay', x: 2100, y: 700, kind: 'food', price: 15, heal: 40 },
+  { name: 'Ammo & Sons', x: 1300, y: 1750, kind: 'guns', price: 250, item: 'pistol' },
+  { name: 'Ironworks Guns', x: 2600, y: 1500, kind: 'guns', price: 600, item: 'smg' },
+  { name: 'Spray & Shine', x: 800, y: 1500, kind: 'paint', price: 100 },
+  { name: 'Doc Marina Clinic', x: 2300, y: 2100, kind: 'clinic', price: 80, heal: 100 },
+];
 
-/** True when (x, y) is on asphalt (a street), not a block, beach or ocean. */
-export function isOnRoad(x, y) {
-  if (y >= WORLD.beachY) return false;
-  const centers = streetCenters();
-  const half = WORLD.road / 2;
-  for (const c of centers) {
-    if (Math.abs(x - c) <= half || Math.abs(y - c) <= half) return true;
+export const SAFEHOUSES = [
+  { name: 'Rosa\'s Apartment', x: 1450, y: 1250 },
+  { name: 'Mango Motel Room 7', x: 700, y: 2100 },
+];
+
+export function buildStreetProps(seed) {
+  const rng = makeRng(seed + 77);
+  const props = [];
+  for (let i = 0; i < 160; i++) {
+    const x = rng() * WORLD_W;
+    const y = rng() * WORLD_H;
+    props.push({ x, y, kind: rngChoice(rng, ['hydrant', 'bench', 'bin', 'lamp', 'cone']) });
   }
-  return false;
+  return props;
 }
-
-/** The nearest street centre to a point, on one axis. */
-export function nearestStreetCoord(v) {
-  const centers = streetCenters();
-  let best = centers[0];
-  for (const c of centers) if (Math.abs(c - v) < Math.abs(best - v)) best = c;
+export function trafficLightPhase(time, x, y) {
+  const cycle = 12;
+  const t = (time + (x + y) * 0.01) % cycle;
+  return t < 5 ? 'green' : t < 6 ? 'yellow' : 'red';
+}
+export function nearestLandmark(x, y) {
+  let best = null; let bd = Infinity;
+  for (const l of LANDMARKS) {
+    const d = (l.x - x) ** 2 + (l.y - y) ** 2;
+    if (d < bd) { bd = d; best = l; }
+  }
   return best;
 }
-
-/** A random point on a random street, from a seeded rng. */
-export function randomStreetPoint(rng) {
-  const centers = streetCenters();
-  const horizontal = rng() < 0.5;
-  const street = pick(rng, centers);
-  const along = range(rng, WORLD.road, WORLD_W - WORLD.road);
-  return horizontal ? { x: along, y: street } : { x: street, y: along };
-}
-
-/** A random point on a sidewalk (the strip just off the asphalt). */
-export function randomSidewalkPoint(rng) {
-  const centers = streetCenters();
-  const horizontal = rng() < 0.5;
-  const street = pick(rng, centers);
-  const along = range(rng, WORLD.road, WORLD_W - WORLD.road);
-  const off = WORLD.road / 2 + WORLD.sidewalk / 2 + range(rng, -4, 4);
-  const side = rng() < 0.5 ? -off : off;
-  const p = horizontal ? { x: along, y: street + side } : { x: street + side, y: along };
-  p.x = clamp(p.x, 40, WORLD_W - 40);
-  p.y = clamp(p.y, 40, WORLD.beachY - 40);
-  return p;
-}
-
-export function generateCity(seed) {
-  const rng = makeRng(seed);
-  const centers = streetCenters();
-  const step = WORLD.block + WORLD.road;
-  const blocks = [];
-  const buildings = [];
-  const palms = [];
-  const lamps = [];
-  const parks = [];
-
-  for (let bi = 0; bi < WORLD.grid; bi++) {
-    for (let bj = 0; bj < WORLD.grid; bj++) {
-      const bx = bi * step + WORLD.road;
-      const by = bj * step + WORLD.road;
-      const roll = rng();
-      if (roll < 0.12) {
-        // Park: grass, a few palms, no buildings.
-        parks.push({ x: bx, y: by, w: WORLD.block, h: WORLD.block });
-        const n = int(rng, 3, 6);
-        for (let k = 0; k < n; k++) {
-          palms.push({ x: bx + range(rng, 30, WORLD.block - 30), y: by + range(rng, 30, WORLD.block - 30), s: range(rng, 0.8, 1.2) });
-        }
-        continue;
-      }
-      if (roll < 0.2) {
-        // Parking lot: flat asphalt with painted bays.
-        blocks.push({ x: bx, y: by, w: WORLD.block, h: WORLD.block, kind: 'lot' });
-        continue;
-      }
-      // Built block: one big building or two smaller ones.
-      const block = { x: bx, y: by, w: WORLD.block, h: WORLD.block, kind: 'built' };
-      blocks.push(block);
-      const two = rng() < 0.45;
-      const spots = two
-        ? [
-            { x: bx + 22, y: by + 22, w: WORLD.block / 2 - 34, h: WORLD.block - 44 },
-            { x: bx + WORLD.block / 2 + 12, y: by + 22, w: WORLD.block / 2 - 34, h: WORLD.block - 44 },
-          ]
-        : [{ x: bx + 24, y: by + 24, w: WORLD.block - 48, h: WORLD.block - 48 }];
-      for (const s of spots) {
-        const color = pick(rng, BUILDING_COLORS);
-        const h = int(rng, 1, 3); // storeys, drawn as a height offset
-        buildings.push({
-          x: s.x, y: s.y, w: s.w, h: s.h, color, storeys: h,
-          roof: shade(color, -28),
-          // Roof dressing: AC boxes and, rarely, a rooftop pool.
-          ac: Array.from({ length: int(rng, 1, 3) }, () => ({
-            x: range(rng, 14, Math.max(15, s.w - 44)),
-            y: range(rng, 14, Math.max(15, s.h - 44)),
-            s: range(rng, 10, 18),
-          })),
-          pool: rng() < 0.14 && s.w > 130 && s.h > 130,
-        });
-      }
-    }
+export function nearestShop(x, y, kind) {
+  let best = null; let bd = Infinity;
+  for (const s of SHOPS) {
+    if (kind && s.kind !== kind) continue;
+    const d = (s.x - x) ** 2 + (s.y - y) ** 2;
+    if (d < bd) { bd = d; best = s; }
   }
-
-  // Palm trees along the sidewalks and the beach promenade.
-  for (const c of centers) {
-    for (let t = WORLD.road * 2; t < WORLD_W - WORLD.road; t += 300) {
-      if (rng() < 0.6) {
-        palms.push({ x: t + range(rng, -40, 40), y: c + WORLD.road / 2 + WORLD.sidewalk / 2, s: range(rng, 0.85, 1.25) });
-      }
-      if (rng() < 0.5) {
-        lamps.push({ x: t + 150, y: c - WORLD.road / 2 - 6 });
-      }
-    }
-  }
-  for (let x = 80; x < WORLD_W; x += 170) {
-    palms.push({ x: x + range(rng, -20, 20), y: WORLD.beachY + 26, s: range(rng, 0.9, 1.3) });
-  }
-
-  return {
-    seed,
-    centers,
-    blocks,
-    buildings,
-    palms,
-    lamps,
-    parks,
-    width: WORLD_W,
-    height: WORLD_H,
-    beachY: WORLD.beachY,
-    oceanY: WORLD.oceanY,
-  };
+  return best;
 }
-
-/** Darken (negative) or lighten (positive) a #rrggbb colour by an amount. */
-export function shade(hex, amount) {
-  const n = parseInt(hex.slice(1), 16);
-  const r = clamp((n >> 16) + amount, 0, 255);
-  const g = clamp(((n >> 8) & 0xff) + amount, 0, 255);
-  const b = clamp((n & 0xff) + amount, 0, 255);
-  return `rgb(${r},${g},${b})`;
-}
-
-/**
- * Resolve a circle against every building and the world edge.
- * Mutates `pos`; returns true when anything pushed it.
- */
-export function collideCity(pos, radius, city) {
-  let hit = false;
-  // Simple full scan is cheap: ~130 buildings, called a few dozen times a frame.
-  for (const b of city.buildings) {
-    if (pos.x + radius < b.x || pos.x - radius > b.x + b.w ||
-        pos.y + radius < b.y || pos.y - radius > b.y + b.h) continue;
-    if (circleRectResolve(pos, radius, b)) hit = true;
-  }
-  // The ocean stops everyone: the south edge is water, not a wall.
-  if (pos.y > WORLD.oceanY - 8) { pos.y = WORLD.oceanY - 8; hit = true; }
-  // World edge: the ocean stops the player, the north/west/east edges are walls.
-  const m = radius + 2;
-  if (pos.x < m) { pos.x = m; hit = true; }
-  if (pos.x > WORLD_W - m) { pos.x = WORLD_W - m; hit = true; }
-  if (pos.y < m) { pos.y = m; hit = true; }
-  if (pos.y > WORLD_H - m) { pos.y = WORLD_H - m; hit = true; }
-  return hit;
-}
-
-/** True when a circle overlaps any building. */
-export function hitsBuilding(x, y, radius, city) {
-  for (const b of city.buildings) {
-    if (x + radius < b.x || x - radius > b.x + b.w ||
-        y + radius < b.y || y - radius > b.y + b.h) continue;
-    const cx = clamp(x, b.x, b.x + b.w);
-    const cy = clamp(y, b.y, b.y + b.h);
-    if ((x - cx) * (x - cx) + (y - cy) * (y - cy) < radius * radius) return true;
-  }
-  return false;
-}
-
-export { pointInRect };

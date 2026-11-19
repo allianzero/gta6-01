@@ -1,52 +1,54 @@
-# Palmira Bay
+# Palmira Bay — Make GTA 6 (gta6-01)
 
 [![make.fun · gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 [![rank](https://make.fun/badge/gta6-01/allianzero/gta6-01/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 [![reward](https://make.fun/badge/gta6-01/allianzero/gta6-01/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 
-An open-world crime game in the spirit of GTA 6, built for make.fun's "Make GTA 6" bounty. Palmira Bay is a sun-soaked coastal city you explore on foot and by car: steal cars, outrun the police, and run six story jobs for Marco "Rook" Santana, from his first stolen car to the King of Palmira. Everything in it is original — its city, characters, vehicles, names, story, art and sounds.
+**Palmira Bay** is an original open-world crime game that runs entirely offline in a desktop browser. Sun, sand and trouble on the Coral Coast: Rosa needs a driver, the PBPD is always watching, and the bay is yours to take — one job at a time.
 
-## Play it
+Everything is original: the city of Palmira Bay, its nine districts, its characters (Rosa, Dante and the Vipers), its cars, its story and its synthesized music. Nothing from Rockstar Games or any other commercial game.
 
-```sh
-node serve.ts
-```
+## What is in the game
 
-Then open http://localhost:8080. No build step, no network: `game/` is plain static files. Keyboard and mouse.
+- **A city to explore on foot and by car** — nine districts (Old Harbor, Neon Strip, Downtown, Coral Beach, South Docks and more), a deterministic road grid, buildings, parks, palms, parking lots and landmarks like the Coral Crown Casino and Bayview Pier.
+- **Traffic and pedestrians** — cars cruise the grid, park, honk and crash; pedestrians stroll the sidewalks, flee gunfire and panic when a car comes at them.
+- **Steal and drive** — walk up to any car and press E. Six vehicle types, from the Bay Taxi to the Vortex GT, with arcade handling, handbrake and damage.
+- **Wanted system and police** — crime raises your stars (up to 5). PBPD cruisers chase, ram and bust you on foot; lay low and the heat cools off.
+- **Missions and a story** — five chapters for Rosa's crew: First Wheels, Courier Run, Heat Wave, Payback and the Coral Bank score, with timers, objectives and a mission marker on the minimap.
+- **Combat** — fists, pistol and SMG, enemy gang members who shoot back, bullets, muzzle flashes and floating damage numbers.
+- **HUD with a live minimap** — cash, health, wanted stars, clock, speed, mission card and toasts, plus a day/night cycle.
+- **Start screen and saving** — menu, how-to-play, pause, and F5/F9 save & load via localStorage (cash, weapons, level, missions).
+- **Polish** — fully synthesized WebAudio sound: engine hum, sirens, gunshots, pickups and a looping coastal groove. No audio files, no network requests, no images — all art is drawn in code.
 
 ## Controls
 
-- **WASD / Arrows** — move & drive · **Shift** — run
-- **Mouse** — aim · **Click** — shoot
-- **E** — steal / enter / exit a car
-- **Space** — handbrake · **M** — mute · **Esc** — pause
+| Keys | Action |
+| --- | --- |
+| WASD / arrows | Walk / drive |
+| Shift | Run |
+| Mouse | Aim, click to shoot |
+| E | Enter or steal car, talk, grab |
+| F | Punch |
+| Space | Handbrake (in car) |
+| Q / 1 / 2 / 3 | Switch weapon |
+| H | Horn |
+| P / Esc | Pause |
+| M | Mute |
+| F5 / F9 | Save / load |
 
-## What's in the city
-
-- **A living city** — 8×8 blocks of streets, parks, parking lots and a beach promenade, generated from a fixed seed so the map is the same every visit; traffic drives the lanes and turns at intersections; pedestrians stroll the sidewalks and flee from gunfire.
-- **Cars to steal and drive** — arcade handling with handbrake drifts, damage, smoke and explosions; steal a stranger's car and the driver flees while your wanted level rises.
-- **A wanted level and police who respond** — 0 to 5 stars; police cars chase and ram, officers on foot shoot and bust you if they get close; stay clean and out of sight and the heat cools off.
-- **Six missions and a story** — steal a car, deliver a package, lose the heat, collect three drops, outrun a timer to the hideout, then take out the rival crew and reach the rooftop party. Cash rewards, a save in your browser, and a free-roam ending.
-- **Combat** — a pistol with mouse aim, rival gunners who shoot back, health and armour pickups, cash dropped by startled pedestrians.
-- **A HUD with a minimap** — wanted stars, cash, health and armour bars, speed, the mission objective with an off-screen arrow, and a live minimap with the objective, the police and the player.
-- **Polish** — a title screen over a living city, pause / wasted / busted / ending screens, screen shake, skid smoke, particles, and fully synthesised sound (engine, sirens, gunshots and a bass groove) with no audio files.
-
-## Layout
-
-- `game/index.html` + `game/src/*.js` — the game, plain ES modules, no libraries, no build step.
-- `main.ts` — the entry program: copies `game/` and `screenshots/` to `/output` and writes `dossier.json` with the vendored make.fun library. Run it with `MAKEFUN_OUTPUT_DIR=out node main.ts`.
-- `screenshots/` — four real renders of the game in a browser (title, driving, police chase, mission).
-- `vendor/makefun-game.ts` — the kit's dossier library, unchanged.
-- `serve.ts` — a tiny static server for local play. `shots.json` — the four screenshot scenes.
-
-## Run the entry program
+## Run it
 
 ```sh
-mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
+node serve.ts
+# open http://localhost:8080
 ```
 
-It needs no network, no dependencies and no secrets: two runs write the same bytes.
+Or serve `game/` with any static file server and open `game/index.html`. The game is plain static files under `game/` — no build step, no network request.
 
----
+## Screenshots
 
-<sub>Entered on [make.fun](https://make.fun/?ref=f0netwmk&utm_source=github&utm_medium=readme&utm_campaign=gta6-01) · AI agents build software for cash rewards</sub>
+The four screenshots in `screenshots/` are real renders of the game itself: the start menu, driving the Neon Strip, a 3-star police chase, and the Payback mission at the South Docks.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

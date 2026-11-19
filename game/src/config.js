@@ -1,159 +1,46 @@
-// Palmira Bay — every tuning number and colour in one place.
-// The world is a fixed grid of streets and blocks; nothing below depends on the screen size.
+// Palmira Bay — shared tuning constants for the open-world crime game.
+// Original city, story and names. Nothing here comes from any commercial game.
+export const GAME_TITLE = 'PALMIRA BAY';
+export const GAME_SUBTITLE = 'Sun, sand and trouble on the Coral Coast';
+export const WORLD_SEED = 1337;
+export const WORLD_W = 3600;
+export const WORLD_H = 2800;
+export const ROAD = 96;
+export const BLOCK = 320;
+export const STEP = ROAD + BLOCK;
+export const FIXED_DT = 1 / 60;
+export const SAVE_KEY = 'palmira-bay-save-v1';
 
-export const WORLD = {
-  /** Pixels across one city block (buildings sit inside these). */
-  block: 360,
-  /** Pixels across one street, kerb to kerb. */
-  road: 120,
-  /** Blocks per side. Streets run at every grid line, so there are GRID + 1 streets. */
-  grid: 8,
-  /** Width of the sidewalk strip along each street. */
-  sidewalk: 18,
-  /** Y where the sand starts; everything south of it is beach, then ocean. */
-  beachY: 3960,
-  /** Y where the ocean starts. */
-  oceanY: 4140,
-};
-
-/** World width and height in pixels, derived from the grid above. */
-export const WORLD_W = WORLD.grid * (WORLD.block + WORLD.road) + WORLD.road; // 3960
-export const WORLD_H = WORLD.oceanY + 180; // 4320
-
-/** Fixed seed: the same city, traffic and pedestrians every visit. */
-export const WORLD_SEED = 20261117;
-
-/** The simulation's fixed step, in seconds: 60 updates a second whatever the display's rate. */
-export const STEP = 1 / 60;
-
-export const PLAYER = {
-  radius: 13,
-  walkSpeed: 175,
-  runSpeed: 265,
-  accel: 2400,
-  friction: 9,
-  maxHealth: 100,
-  enterRange: 80,
-  punchDamage: 12,
-};
-
-export const CAR = {
-  length: 64,
-  width: 32,
-  /** Engine force, pixels per second squared. */
-  accel: 560,
-  brake: 900,
-  reverseAccel: 320,
-  /** Top speed, pixels per second. */
-  topSpeed: 620,
-  reverseTop: 220,
-  /** Steering, radians per second at full lock, scaled down with speed. */
-  steer: 2.6,
-  grip: 6.5,
-  handbrakeGrip: 1.6,
-  maxHealth: 100,
-};
-
-export const TRAFFIC = {
-  count: 26,
-  cruiseMin: 150,
-  cruiseMax: 240,
-  turnChance: 0.34,
-  followGap: 84,
-};
-
-export const PEDS = {
-  count: 42,
-  walkMin: 42,
-  walkMax: 78,
-  fleeSpeed: 150,
-};
-
-export const POLICE = {
-  /** Wanted stars, 0 to 5. */
-  maxStars: 5,
-  /** Seconds without a crime before the heat starts to cool. */
-  coolDown: 12,
-  /** Seconds between star drops while cooling and unseen. */
-  coolTick: 8,
-  /** How many police cars may hunt at once, by stars. */
-  carsByStars: [0, 1, 2, 3, 4, 5],
-  /** How many on-foot officers may hunt at once, by stars. */
-  copsByStars: [0, 0, 1, 2, 3, 4],
-  carTopSpeed: 660,
-  copSpeed: 205,
-  /** Seconds an officer must touch the player to bust them. */
-  bustTime: 1.4,
-  /** Distance at which an officer opens fire. */
-  shootRange: 300,
-};
-
-export const COMBAT = {
-  bulletSpeed: 950,
-  bulletRange: 560,
-  bulletDamage: 34,
-  fireCooldown: 0.26,
-  enemyDamage: 9,
-  enemyCooldown: 0.7,
-  carRamDamage: 26,
-};
-
-export const MISSIONS = [
-  { name: 'First Wheels', reward: 150 },
-  { name: 'The Pickup', reward: 300 },
-  { name: 'Heat Rising', reward: 450 },
-  { name: 'Three Stops', reward: 600 },
-  { name: 'The Getaway', reward: 900 },
-  { name: 'King of Palmira', reward: 1500 },
+export const DISTRICTS = [
+  { name: 'Old Harbor', x: 0, y: 0, w: 1200, h: 900, tint: '#3d6b8e' },
+  { name: 'Neon Strip', x: 1200, y: 0, w: 1200, h: 900, tint: '#8e3d7a' },
+  { name: 'Palm Heights', x: 2400, y: 0, w: 1200, h: 900, tint: '#3d8e5a' },
+  { name: 'Marina West', x: 0, y: 900, w: 1200, h: 1000, tint: '#3d7a8e' },
+  { name: 'Downtown', x: 1200, y: 900, w: 1200, h: 1000, tint: '#8e7a3d' },
+  { name: 'Coral Beach', x: 2400, y: 900, w: 1200, h: 1000, tint: '#c2a35a' },
+  { name: 'South Docks', x: 0, y: 1900, w: 1200, h: 900, tint: '#5a5a6b' },
+  { name: 'Little Havana Bay', x: 1200, y: 1900, w: 1200, h: 900, tint: '#8e5a3d' },
+  { name: 'Sunset Fields', x: 2400, y: 1900, w: 1200, h: 900, tint: '#6b8e3d' },
 ];
 
-export const PALETTE = {
-  asphalt: '#3a3f4a',
-  asphaltDark: '#333743',
-  roadLine: '#e8d44f',
-  sidewalk: '#b8a88f',
-  sidewalkEdge: '#9a8a72',
-  sand: '#e9cf9a',
-  sandDark: '#ddc186',
-  ocean: '#2f7fa8',
-  oceanDeep: '#256b8f',
-  grass: '#7fae5a',
-  grassDark: '#6f9c4c',
-  buildingRoof: '#8a6f5c',
-  player: '#ffd23f',
-  playerCar: '#e63946',
-  policeCar: '#2b4acb',
-  policeLightRed: '#ff2d2d',
-  policeLightBlue: '#2d7dff',
-  text: '#f4efe4',
-  muted: '#c9c2b2',
-  hudPanel: 'rgba(12, 14, 20, 0.72)',
-  hudBorder: 'rgba(244, 239, 228, 0.25)',
-  star: '#ffd23f',
-  starEmpty: 'rgba(244, 239, 228, 0.35)',
-  health: '#3ddc74',
-  healthLow: '#ff4747',
-  cash: '#7dff9b',
-  marker: '#ffd23f',
-  danger: '#ff4747',
-};
-
-/** Sun-soaked building colours: terracotta, cream, teal, coral, sand, white, pink, mint. */
-export const BUILDING_COLORS = [
-  '#e07856', '#f2e3c6', '#4fa8a0', '#e88ca0', '#d9b380',
-  '#f5f0e6', '#c96f8e', '#8fc7a3', '#e8a94f', '#7fa8c9',
-  '#b08968', '#d97b6c', '#a3c585', '#e6c25a', '#9b7fb8',
+export const CAR_DEFS = [
+  { id: 'sedan', name: 'Coral Sedan', color: '#c94f42', speed: 300, accel: 210, grip: 3.2, w: 46, h: 22 },
+  { id: 'taxi', name: 'Bay Taxi', color: '#e8b93c', speed: 280, accel: 200, grip: 3.0, w: 46, h: 22 },
+  { id: 'sport', name: 'Vortex GT', color: '#3c7ae8', speed: 400, accel: 290, grip: 3.8, w: 48, h: 21 },
+  { id: 'truck', name: 'Hauler Van', color: '#7a7a82', speed: 230, accel: 150, grip: 2.6, w: 56, h: 24 },
+  { id: 'cop', name: 'PBPD Cruiser', color: '#22283a', speed: 360, accel: 260, grip: 3.6, w: 47, h: 22 },
+  { id: 'muscle', name: 'Sunset Muscle', color: '#7a3ce8', speed: 350, accel: 250, grip: 3.3, w: 48, h: 22 },
 ];
 
-/** Paint jobs for traffic cars. */
-export const CAR_COLORS = [
-  '#c0392b', '#2980b9', '#27ae60', '#f39c12', '#8e44ad',
-  '#ecf0f1', '#2c3e50', '#e67e22', '#16a085', '#d35400',
-  '#7f8c8d', '#b03a2e', '#1f618d', '#943126', '#ca6f1e',
+export const WEAPONS = [
+  { id: 'fists', name: 'Fists', damage: 12, range: 34, rate: 0.35, ammo: -1 },
+  { id: 'pistol', name: 'P9 Pistol', damage: 26, range: 320, rate: 0.28, ammo: 12 },
+  { id: 'smg', name: 'Stinger SMG', damage: 14, range: 280, rate: 0.09, ammo: 30 },
 ];
 
-export const FONT = '"Trebuchet MS", "Segoe UI", system-ui, sans-serif';
-export const FONT_DISPLAY = '"Arial Black", "Trebuchet MS", sans-serif';
+export const WANTED_DECAY = 14;
+export const MAX_WANTED = 5;
+export const COP_RESPAWN = 2.2;
 
-/** Where the save lives in this browser only. */
-export const SAVE_KEY = 'palmira-bay.save.v1';
+export const PLAYER_START = { x: 1450, y: 1250, angle: -Math.PI / 2 };
+export const DAY_LENGTH = 240;
